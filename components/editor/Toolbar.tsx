@@ -6,7 +6,7 @@ import {
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   List, ListOrdered, Quote, Undo, Redo,
   Heading1, Heading2, Heading3, Highlighter, GitBranch,
-  Table, Image as ImageIcon, MessageSquarePlus
+  Table, Image as ImageIcon, MessageSquarePlus, BookOpen
 } from 'lucide-react'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { FontPicker } from './FontPicker'
@@ -19,6 +19,8 @@ interface ToolbarProps {
   onToggleTrackChanges: () => void
   onAddComment: () => void
   hasSelection: boolean
+  tocOpen: boolean
+  onToggleToc: () => void
 }
 
 function ToolBtn({ onClick, active, disabled, title, children }: {
@@ -49,7 +51,7 @@ function Sep() {
   return <div className="w-px h-5 bg-[#E5E5E5] mx-0.5" />
 }
 
-export function Toolbar({ editor, trackChangesEnabled, onToggleTrackChanges, onAddComment, hasSelection }: ToolbarProps) {
+export function Toolbar({ editor, trackChangesEnabled, onToggleTrackChanges, onAddComment, hasSelection, tocOpen, onToggleToc }: ToolbarProps) {
   function addTable() {
     editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
   }
@@ -72,6 +74,20 @@ export function Toolbar({ editor, trackChangesEnabled, onToggleTrackChanges, onA
 
   return (
     <div className="bg-white border-b border-[#E5E5E5] px-4 py-1.5 flex items-center gap-0.5 overflow-x-auto shrink-0">
+      <Tooltip content="Table of contents">
+        <button
+          onMouseDown={e => { e.preventDefault(); onToggleToc() }}
+          className={cn(
+            'p-1.5 rounded transition-colors',
+            tocOpen ? 'bg-[#111111] text-white' : 'text-[#6B6B6B] hover:bg-[#F5F5F5] hover:text-[#111111]'
+          )}
+        >
+          <BookOpen size={15} />
+        </button>
+      </Tooltip>
+
+      <Sep />
+
       <ToolBtn onClick={() => editor.chain().focus().undo().run()} title="Undo" disabled={!editor.can().undo()}>
         <Undo size={15} />
       </ToolBtn>

@@ -19,6 +19,7 @@ import { CustomFontFamily } from '@/lib/tiptap/extensions/CustomFontFamily'
 import { Toolbar } from './Toolbar'
 import { CommentSidebar } from './CommentSidebar'
 import { TrackChangesBar } from './TrackChangesBar'
+import { TocPanel } from './TocPanel'
 import { useComments } from '@/hooks/useComments'
 import { MessageSquarePlus } from 'lucide-react'
 
@@ -34,12 +35,20 @@ interface EditorProps {
 export default function Editor({ documentId, initialContent, onContentChange, editable = true, userId, userName }: EditorProps) {
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false)
   const [commentSidebarOpen, setCommentSidebarOpen] = useState(false)
+  const [tocOpen, setTocOpen] = useState(false)
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
   const [pendingComment, setPendingComment] = useState<{ from: number; to: number } | null>(null)
   const [selectionPos, setSelectionPos] = useState<{ top: number; left: number } | null>(null)
   const [hasSelection, setHasSelection] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const { comments, addComment, addReply, resolveComment } = useComments(documentId)
+
+  // If the document was imported from .docx, it has { _importedHtml: "..." }
+  // We pass the HTML string directly so Tiptap parses it in the browser.
+  const isImport = initialContent && (initialContent as { _importedHtml?: string })._importedHtml
+  const contentProp: string | object = isImport
+    ? (initialContent as { _importedHtml: string })._importedHtml
+    : (initialContent || '')
 
   const editor = useEditor({
     extensions: [
@@ -60,13 +69,20 @@ export default function Editor({ documentId, initialContent, onContentChange, ed
       TrackDelete,
       TrackChanges,
     ],
-    content: initialContent || '',
+    content: contentProp,
     editable,
-    onUpdate: ({ editor }) => {
-      onContentChange(editor.getJSON())
+    // After the editor is ready, if content came from an import, save it
+    // immediately as Tiptap JSON so we don't re-parse HTML on every reload.
+    onCreate: ({ editor: e }) => {
+      if (isImport) {
+        setTimeout(() => onContentChange(e.getJSON()), 200)
+      }
     },
-    onSelectionUpdate: ({ editor }) => {
-      const { from, to } = editor.state.selection
+    onUpdate: ({ editor: e }) => {
+      onContentChange(e.getJSON())
+    },
+    onSelectionUpdate: ({ editor: e }) => {
+      const { from, to } = e.state.selection
       if (from !== to) {
         const domSelection = window.getSelection()
         if (domSelection && domSelection.rangeCount > 0) {
@@ -157,6 +173,8 @@ export default function Editor({ documentId, initialContent, onContentChange, ed
           onToggleTrackChanges={() => setTrackChangesEnabled(v => !v)}
           onAddComment={handleAddComment}
           hasSelection={hasSelection}
+          tocOpen={tocOpen}
+          onToggleToc={() => setTocOpen(v => !v)}
         />
       )}
 
@@ -168,6 +186,10 @@ export default function Editor({ documentId, initialContent, onContentChange, ed
       )}
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Table of Contents panel */}
+        {tocOpen && editor && <TocPanel editor={editor} />}
+
+        {/* Document canvas */}
         <div className="flex-1 overflow-auto bg-[#FAFAFA]">
           <div className="max-w-[720px] mx-auto my-8">
             <div
@@ -199,6 +221,7 @@ export default function Editor({ documentId, initialContent, onContentChange, ed
           </div>
         </div>
 
+        {/* Comments sidebar */}
         {commentSidebarOpen && (
           <CommentSidebar
             comments={comments}

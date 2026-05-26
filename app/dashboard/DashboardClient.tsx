@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Plus, Settings, LogOut, FileText } from 'lucide-react'
+import { Plus, Settings, LogOut, FileText, Upload } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { DocCard } from '@/components/dashboard/DocCard'
 import { Button } from '@/components/ui/Button'
@@ -27,6 +27,9 @@ interface Props {
 export default function DashboardClient({ initialDocs, user, profile }: Props) {
   const [docs, setDocs] = useState(initialDocs)
   const [creating, setCreating] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const supabase = createClient()
 
@@ -50,6 +53,28 @@ export default function DashboardClient({ initialDocs, user, profile }: Props) {
       .eq('document_id', docId)
       .eq('user_id', user.id)
     if (!error) setDocs(d => d.filter(doc => doc.id !== docId))
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+
+    setImporting(true)
+    setImportError(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const res = await fetch('/api/import', { method: 'POST', body: formData })
+    const data = await res.json()
+    setImporting(false)
+
+    if (!res.ok) {
+      setImportError(data.error || 'Import failed')
+      return
+    }
+    router.push(`/docs/${data.id}`)
   }
 
   async function handleRename(docId: string, title: string) {
@@ -95,11 +120,37 @@ export default function DashboardClient({ initialDocs, user, profile }: Props) {
       <main className="max-w-5xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-lg font-semibold">Documents</h1>
-          <Button onClick={handleNewDoc} disabled={creating} size="sm">
-            <Plus size={14} />
-            {creating ? 'Creating…' : 'New document'}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Import .docx */}
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".docx"
+              className="hidden"
+              onChange={handleImport}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => importInputRef.current?.click()}
+              disabled={importing || creating}
+            >
+              <Upload size={14} />
+              {importing ? 'Importing…' : 'Import .docx'}
+            </Button>
+
+            <Button onClick={handleNewDoc} disabled={creating || importing} size="sm">
+              <Plus size={14} />
+              {creating ? 'Creating…' : 'New document'}
+            </Button>
+          </div>
         </div>
+
+        {importError && (
+          <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-md text-xs text-red-600">
+            {importError}
+          </div>
+        )}
 
         {docs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -107,11 +158,17 @@ export default function DashboardClient({ initialDocs, user, profile }: Props) {
               <FileText size={20} className="text-[#AAAAAA]" />
             </div>
             <p className="text-sm font-medium text-[#111111]">No documents yet</p>
-            <p className="text-sm text-[#6B6B6B] mt-1 mb-4">Create your first document to get started</p>
-            <Button onClick={handleNewDoc} disabled={creating} size="sm">
-              <Plus size={14} />
-              New document
-            </Button>
+            <p className="text-sm text-[#6B6B6B] mt-1 mb-4">Create a new document or import a Google Doc</p>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => importInputRef.current?.click()} disabled={importing}>
+                <Upload size={14} />
+                {importing ? 'Importing…' : 'Import .docx'}
+              </Button>
+              <Button onClick={handleNewDoc} disabled={creating} size="sm">
+                <Plus size={14} />
+                New document
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
