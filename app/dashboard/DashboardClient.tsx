@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Plus, Settings, LogOut, FileText, Upload } from 'lucide-react'
+import { Plus, Settings, LogOut, FileText, ExternalLink, X, Loader } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { DocCard } from '@/components/dashboard/DocCard'
 import { Button } from '@/components/ui/Button'
@@ -24,12 +24,122 @@ interface Props {
   profile: { full_name: string | null; email: string | null; avatar_url: string | null } | null
 }
 
+// ── Google Docs import modal ──────────────────────────────────────────────
+
+function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (docId: string) => void }) {
+  const [url, setUrl] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleImport(e: React.FormEvent) {
+    e.preventDefault()
+    if (!url.trim()) return
+    setLoading(true)
+    setError(null)
+
+    const res = await fetch('/api/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url.trim() }),
+    })
+    const data = await res.json()
+    setLoading(false)
+
+    if (!res.ok) {
+      setError(data.error || 'Import failed')
+      return
+    }
+    onSuccess(data.id)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px]">
+      <div className="bg-white rounded-xl border border-[#E5E5E5] shadow-xl w-full max-w-md mx-4">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-[#E5E5E5]">
+          <div className="flex items-center gap-2.5">
+            {/* Google Docs colour icon */}
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <rect width="18" height="18" rx="3" fill="#4285F4"/>
+              <rect x="4" y="5" width="10" height="1.5" rx="0.75" fill="white"/>
+              <rect x="4" y="8" width="10" height="1.5" rx="0.75" fill="white"/>
+              <rect x="4" y="11" width="7" height="1.5" rx="0.75" fill="white"/>
+            </svg>
+            <span className="text-sm font-semibold text-[#111111]">Import from Google Docs</span>
+          </div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-[#F5F5F5] text-[#AAAAAA] hover:text-[#111111] transition-colors">
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <form onSubmit={handleImport} className="px-5 py-4 flex flex-col gap-4">
+          {/* Instructions */}
+          <div className="bg-[#F8FAFF] border border-[#DBEAFE] rounded-lg px-3.5 py-3 text-xs text-[#3B82F6] leading-relaxed">
+            <p className="font-medium mb-1">Before pasting, share your doc:</p>
+            <ol className="list-decimal list-inside space-y-0.5 text-[#6B7FB8]">
+              <li>Open your Google Doc</li>
+              <li>Click <strong className="text-[#3B82F6]">Share</strong> → <strong className="text-[#3B82F6]">Change to anyone with the link</strong></li>
+              <li>Set permission to <strong className="text-[#3B82F6]">Viewer</strong> (or Editor)</li>
+              <li>Copy the link and paste it below</li>
+            </ol>
+          </div>
+
+          {/* URL input */}
+          <div>
+            <label className="block text-xs font-medium text-[#111111] mb-1.5">
+              Google Docs link
+            </label>
+            <div className="relative">
+              <input
+                type="url"
+                value={url}
+                onChange={e => { setUrl(e.target.value); setError(null) }}
+                placeholder="https://docs.google.com/document/d/…"
+                required
+                autoFocus
+                className="w-full pl-3 pr-8 py-2 text-sm border border-[#E5E5E5] rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-[#111111] focus:border-[#111111] placeholder:text-[#AAAAAA]"
+              />
+              <ExternalLink size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <p className="text-xs text-[#EF4444] leading-relaxed">{error}</p>
+          )}
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={loading}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={loading || !url.trim()}>
+              {loading ? (
+                <>
+                  <Loader size={12} className="animate-spin" />
+                  Importing…
+                </>
+              ) : (
+                <>
+                  <ExternalLink size={12} />
+                  Import
+                </>
+              )}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────
+
 export default function DashboardClient({ initialDocs, user, profile }: Props) {
   const [docs, setDocs] = useState(initialDocs)
   const [creating, setCreating] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
-  const importInputRef = useRef<HTMLInputElement>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
@@ -53,28 +163,6 @@ export default function DashboardClient({ initialDocs, user, profile }: Props) {
       .eq('document_id', docId)
       .eq('user_id', user.id)
     if (!error) setDocs(d => d.filter(doc => doc.id !== docId))
-  }
-
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-
-    setImporting(true)
-    setImportError(null)
-
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const res = await fetch('/api/import', { method: 'POST', body: formData })
-    const data = await res.json()
-    setImporting(false)
-
-    if (!res.ok) {
-      setImportError(data.error || 'Import failed')
-      return
-    }
-    router.push(`/docs/${data.id}`)
   }
 
   async function handleRename(docId: string, title: string) {
@@ -121,36 +209,29 @@ export default function DashboardClient({ initialDocs, user, profile }: Props) {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-lg font-semibold">Documents</h1>
           <div className="flex items-center gap-2">
-            {/* Import .docx */}
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".docx"
-              className="hidden"
-              onChange={handleImport}
-            />
+            {/* Google Docs import */}
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => importInputRef.current?.click()}
-              disabled={importing || creating}
+              onClick={() => setShowImportModal(true)}
+              disabled={creating}
             >
-              <Upload size={14} />
-              {importing ? 'Importing…' : 'Import .docx'}
+              {/* Mini Google Docs icon */}
+              <svg width="13" height="13" viewBox="0 0 18 18" fill="none">
+                <rect width="18" height="18" rx="3" fill="#4285F4"/>
+                <rect x="4" y="5" width="10" height="1.5" rx="0.75" fill="white"/>
+                <rect x="4" y="8" width="10" height="1.5" rx="0.75" fill="white"/>
+                <rect x="4" y="11" width="7" height="1.5" rx="0.75" fill="white"/>
+              </svg>
+              Import Google Doc
             </Button>
 
-            <Button onClick={handleNewDoc} disabled={creating || importing} size="sm">
+            <Button onClick={handleNewDoc} disabled={creating} size="sm">
               <Plus size={14} />
               {creating ? 'Creating…' : 'New document'}
             </Button>
           </div>
         </div>
-
-        {importError && (
-          <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-md text-xs text-red-600">
-            {importError}
-          </div>
-        )}
 
         {docs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -158,11 +239,18 @@ export default function DashboardClient({ initialDocs, user, profile }: Props) {
               <FileText size={20} className="text-[#AAAAAA]" />
             </div>
             <p className="text-sm font-medium text-[#111111]">No documents yet</p>
-            <p className="text-sm text-[#6B6B6B] mt-1 mb-4">Create a new document or import a Google Doc</p>
+            <p className="text-sm text-[#6B6B6B] mt-1 mb-4">
+              Create a new document or import from Google Docs
+            </p>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => importInputRef.current?.click()} disabled={importing}>
-                <Upload size={14} />
-                {importing ? 'Importing…' : 'Import .docx'}
+              <Button variant="ghost" size="sm" onClick={() => setShowImportModal(true)}>
+                <svg width="13" height="13" viewBox="0 0 18 18" fill="none">
+                  <rect width="18" height="18" rx="3" fill="#4285F4"/>
+                  <rect x="4" y="5" width="10" height="1.5" rx="0.75" fill="white"/>
+                  <rect x="4" y="8" width="10" height="1.5" rx="0.75" fill="white"/>
+                  <rect x="4" y="11" width="7" height="1.5" rx="0.75" fill="white"/>
+                </svg>
+                Import Google Doc
               </Button>
               <Button onClick={handleNewDoc} disabled={creating} size="sm">
                 <Plus size={14} />
@@ -185,6 +273,17 @@ export default function DashboardClient({ initialDocs, user, profile }: Props) {
           </div>
         )}
       </main>
+
+      {/* Import modal */}
+      {showImportModal && (
+        <ImportModal
+          onClose={() => setShowImportModal(false)}
+          onSuccess={docId => {
+            setShowImportModal(false)
+            router.push(`/docs/${docId}`)
+          }}
+        />
+      )}
     </div>
   )
 }
