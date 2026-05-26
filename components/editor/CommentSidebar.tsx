@@ -20,7 +20,7 @@ interface CommentSidebarProps {
   currentUserId: string
 }
 
-function CommentItem({ comment, active, onSelect, onResolve, onReply, currentUserId }: {
+function CommentItem({ comment, active, onSelect, onResolve, onReply, currentUserId: _currentUserId }: {
   comment: Comment
   active: boolean
   onSelect: () => void

@@ -127,7 +127,7 @@ export const TrackChanges = Extension.create({
   },
 
   addProseMirrorPlugins() {
-    const ext = this
+    const { editor } = this
 
     return [
       new Plugin({
@@ -135,7 +135,7 @@ export const TrackChanges = Extension.create({
         props: {
           // Intercept typed text
           handleTextInput(view, from, to, text) {
-            const storage = (ext.editor.storage as any).trackChanges
+            const storage = (editor.storage as any).trackChanges
             if (!storage?.enabled) return false
 
             const user = storage.currentUser || { id: 'unknown', name: 'Unknown' }
@@ -166,7 +166,7 @@ export const TrackChanges = Extension.create({
 
           // Intercept Backspace / Delete
           handleKeyDown(view, event) {
-            const storage = (ext.editor.storage as any).trackChanges
+            const storage = (editor.storage as any).trackChanges
             if (!storage?.enabled) return false
 
             const isBackspace = event.key === 'Backspace'

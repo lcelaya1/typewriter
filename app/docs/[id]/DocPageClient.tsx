@@ -35,6 +35,7 @@ export default function DocPageClient({ doc, userId, userName, isOwner, editable
     if (document?.title && document.title !== title) {
       setTitle(document.title)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [document?.title])
 
   function handleTitleBlur() {
