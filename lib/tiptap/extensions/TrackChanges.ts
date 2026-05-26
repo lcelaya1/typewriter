@@ -1,5 +1,5 @@
 import { Extension, Mark, mergeAttributes } from '@tiptap/core'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -191,9 +191,9 @@ export const TrackChanges = Extension.create({
               const tr = state.tr.addMark(delFrom, delTo, delMark)
               // Move cursor to the correct position
               if (isBackspace) {
-                tr.setSelection(state.selection.constructor.near(tr.doc.resolve(delFrom)) as any)
+                tr.setSelection(TextSelection.near(tr.doc.resolve(delFrom)))
               } else {
-                tr.setSelection(state.selection.constructor.near(tr.doc.resolve(delTo)) as any)
+                tr.setSelection(TextSelection.near(tr.doc.resolve(delTo)))
               }
               view.dispatch(tr)
               return true
@@ -206,7 +206,7 @@ export const TrackChanges = Extension.create({
               })
               const tr = state.tr.addMark(from, to, delMark)
               // Collapse selection to start
-              tr.setSelection(state.selection.constructor.near(tr.doc.resolve(from)) as any)
+              tr.setSelection(TextSelection.near(tr.doc.resolve(from)))
               view.dispatch(tr)
               return true
             }
