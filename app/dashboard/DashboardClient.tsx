@@ -1,13 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Plus, Settings, LogOut, FileText, ExternalLink, X, Loader } from 'lucide-react'
+import { Plus, Settings, LogOut, FileText, ExternalLink, X, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { DocCard } from '@/components/dashboard/DocCard'
 import { Button } from '@/components/ui/Button'
 import { Avatar } from '@/components/ui/Avatar'
+import { cn } from '@/lib/utils'
 
 interface Doc {
   id: string
@@ -24,111 +25,250 @@ interface Props {
   profile: { full_name: string | null; email: string | null; avatar_url: string | null } | null
 }
 
+// ── Progress stages ───────────────────────────────────────────────────────
+
+const STAGES = [
+  { label: 'Connecting to Google Docs…',  upTo: 14 },
+  { label: 'Downloading document…',        upTo: 48 },
+  { label: 'Converting content…',          upTo: 74 },
+  { label: 'Preparing your document…',     upTo: 93 },
+]
+
+function stageLabel(pct: number) {
+  return STAGES.find(s => pct < s.upTo)?.label ?? 'Almost done…'
+}
+
+function formatElapsed(s: number) {
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
 // ── Google Docs import modal ──────────────────────────────────────────────
 
+type Phase = 'form' | 'importing' | 'done' | 'error'
+
 function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (docId: string) => void }) {
-  const [url, setUrl] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [url, setUrl]         = useState('')
+  const [phase, setPhase]     = useState<Phase>('form')
+  const [error, setError]     = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
+  const [elapsed, setElapsed]   = useState(0)
+
+  // Keep progress value in a ref so intervals don't capture stale state
+  const progressRef = useRef(0)
 
   async function handleImport(e: React.FormEvent) {
     e.preventDefault()
     if (!url.trim()) return
-    setLoading(true)
+
+    setPhase('importing')
     setError(null)
+    progressRef.current = 0
+    setProgress(0)
+    setElapsed(0)
 
-    const res = await fetch('/api/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: url.trim() }),
-    })
-    const data = await res.json()
-    setLoading(false)
+    const startTime = Date.now()
 
-    if (!res.ok) {
-      setError(data.error || 'Import failed')
-      return
+    // ── elapsed counter ───────────────────────────────────────────────
+    const elapsedId = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTime) / 1000))
+    }, 1000)
+
+    // ── progress animation ────────────────────────────────────────────
+    // Decay formula: starts fast, asymptotically approaches 93 %
+    const progressId = setInterval(() => {
+      const curr = progressRef.current
+      const next = Math.min(93, curr + Math.max(0.25, (93 - curr) * 0.042))
+      progressRef.current = next
+      setProgress(next)
+    }, 120)
+
+    // ── API call ──────────────────────────────────────────────────────
+    try {
+      const res  = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim() }),
+      })
+      const data = await res.json()
+
+      clearInterval(elapsedId)
+      clearInterval(progressId)
+
+      if (!res.ok) {
+        setPhase('error')
+        setError(data.error || 'Import failed')
+        return
+      }
+
+      // Snap to 100 % then navigate
+      progressRef.current = 100
+      setProgress(100)
+      setPhase('done')
+      setTimeout(() => onSuccess(data.id), 750)
+    } catch {
+      clearInterval(elapsedId)
+      clearInterval(progressId)
+      setPhase('error')
+      setError('Network error — please check your connection and try again.')
     }
-    onSuccess(data.id)
   }
+
+  // Animate progress bar transition duration (shorter when almost done)
+  const transitionMs = progress >= 98 ? 300 : 350
+
+  const GDocsIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <rect width="18" height="18" rx="3" fill="#4285F4"/>
+      <rect x="4" y="5"  width="10" height="1.5" rx="0.75" fill="white"/>
+      <rect x="4" y="8"  width="10" height="1.5" rx="0.75" fill="white"/>
+      <rect x="4" y="11" width="7"  height="1.5" rx="0.75" fill="white"/>
+    </svg>
+  )
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px]">
-      <div className="bg-white rounded-xl border border-[#E5E5E5] shadow-xl w-full max-w-md mx-4">
-        {/* Header */}
+      <div className="bg-white rounded-xl border border-[#E5E5E5] shadow-xl w-full max-w-md mx-4 overflow-hidden">
+
+        {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-[#E5E5E5]">
           <div className="flex items-center gap-2.5">
-            {/* Google Docs colour icon */}
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <rect width="18" height="18" rx="3" fill="#4285F4"/>
-              <rect x="4" y="5" width="10" height="1.5" rx="0.75" fill="white"/>
-              <rect x="4" y="8" width="10" height="1.5" rx="0.75" fill="white"/>
-              <rect x="4" y="11" width="7" height="1.5" rx="0.75" fill="white"/>
-            </svg>
+            <GDocsIcon />
             <span className="text-sm font-semibold text-[#111111]">Import from Google Docs</span>
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-[#F5F5F5] text-[#AAAAAA] hover:text-[#111111] transition-colors">
+          <button
+            onClick={onClose}
+            disabled={phase === 'importing'}
+            className="p-1 rounded hover:bg-[#F5F5F5] text-[#AAAAAA] hover:text-[#111111] transition-colors disabled:opacity-30 disabled:pointer-events-none"
+          >
             <X size={15} />
           </button>
         </div>
 
-        {/* Body */}
-        <form onSubmit={handleImport} className="px-5 py-4 flex flex-col gap-4">
-          {/* Instructions */}
-          <div className="bg-[#F8FAFF] border border-[#DBEAFE] rounded-lg px-3.5 py-3 text-xs text-[#3B82F6] leading-relaxed">
-            <p className="font-medium mb-1">Before pasting, share your doc:</p>
-            <ol className="list-decimal list-inside space-y-0.5 text-[#6B7FB8]">
-              <li>Open your Google Doc</li>
-              <li>Click <strong className="text-[#3B82F6]">Share</strong> → <strong className="text-[#3B82F6]">Change to anyone with the link</strong></li>
-              <li>Set permission to <strong className="text-[#3B82F6]">Viewer</strong> (or Editor)</li>
-              <li>Copy the link and paste it below</li>
-            </ol>
-          </div>
+        {/* ── Form view ──────────────────────────────────────────────── */}
+        {(phase === 'form' || phase === 'error') && (
+          <form onSubmit={handleImport} className="px-5 py-4 flex flex-col gap-4">
+            <div className="bg-[#F8FAFF] border border-[#DBEAFE] rounded-lg px-3.5 py-3 text-xs leading-relaxed">
+              <p className="font-medium text-[#3B82F6] mb-1">Before pasting, share your doc:</p>
+              <ol className="list-decimal list-inside space-y-0.5 text-[#6B7FB8]">
+                <li>Open your Google Doc</li>
+                <li>Click <strong className="text-[#3B82F6]">Share → Change to anyone with the link</strong></li>
+                <li>Set permission to <strong className="text-[#3B82F6]">Viewer</strong> (or Editor)</li>
+                <li>Copy the link and paste it below</li>
+              </ol>
+            </div>
 
-          {/* URL input */}
-          <div>
-            <label className="block text-xs font-medium text-[#111111] mb-1.5">
-              Google Docs link
-            </label>
-            <div className="relative">
-              <input
-                type="url"
-                value={url}
-                onChange={e => { setUrl(e.target.value); setError(null) }}
-                placeholder="https://docs.google.com/document/d/…"
-                required
-                autoFocus
-                className="w-full pl-3 pr-8 py-2 text-sm border border-[#E5E5E5] rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-[#111111] focus:border-[#111111] placeholder:text-[#AAAAAA]"
-              />
-              <ExternalLink size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none" />
+            <div>
+              <label className="block text-xs font-medium text-[#111111] mb-1.5">Google Docs link</label>
+              <div className="relative">
+                <input
+                  type="url"
+                  value={url}
+                  onChange={e => { setUrl(e.target.value); setError(null) }}
+                  placeholder="https://docs.google.com/document/d/…"
+                  required
+                  autoFocus
+                  className="w-full pl-3 pr-8 py-2 text-sm border border-[#E5E5E5] rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-[#111111] focus:border-[#111111] placeholder:text-[#AAAAAA]"
+                />
+                <ExternalLink size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#AAAAAA] pointer-events-none" />
+              </div>
+            </div>
+
+            {error && (
+              <p className="text-xs text-[#EF4444] leading-relaxed bg-red-50 border border-red-100 rounded-md px-3 py-2">
+                {error}
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+              <Button type="submit" size="sm" disabled={!url.trim()}>
+                <ExternalLink size={12} />
+                {phase === 'error' ? 'Try again' : 'Import'}
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {/* ── Progress view ───────────────────────────────────────────── */}
+        {(phase === 'importing' || phase === 'done') && (
+          <div className="px-5 py-8 flex flex-col gap-5">
+            {/* Stage label + spinner / check */}
+            <div className="flex items-center gap-2.5">
+              {phase === 'done' ? (
+                <CheckCircle2 size={16} className="text-[#22C55E] shrink-0" />
+              ) : (
+                <span className="relative flex h-4 w-4 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#3B82F6] opacity-30" />
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-[#3B82F6] opacity-70" />
+                </span>
+              )}
+              <span className={cn(
+                'text-sm font-medium transition-colors',
+                phase === 'done' ? 'text-[#22C55E]' : 'text-[#111111]'
+              )}>
+                {phase === 'done' ? 'Import complete!' : stageLabel(progress)}
+              </span>
+            </div>
+
+            {/* Progress bar */}
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs text-[#AAAAAA]">
+                  {phase === 'done' ? 'Done' : 'Processing'}
+                </span>
+                <span className="text-xs font-medium text-[#111111] tabular-nums">
+                  {Math.round(progress)}%
+                </span>
+              </div>
+
+              {/* Track */}
+              <div className="h-2 bg-[#F0F0F0] rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full',
+                    phase === 'done' ? 'bg-[#22C55E]' : 'bg-[#3B82F6]'
+                  )}
+                  style={{
+                    width: `${progress}%`,
+                    transition: `width ${transitionMs}ms ease-out`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Step dots */}
+            <div className="flex items-center gap-1.5">
+              {STAGES.map((stage, i) => {
+                const stageStart = i === 0 ? 0 : STAGES[i - 1].upTo
+                const active = progress >= stageStart
+                const complete = progress >= stage.upTo
+                return (
+                  <div key={i} className="flex items-center gap-1.5 flex-1">
+                    <div className={cn(
+                      'h-1 rounded-full transition-all duration-500 flex-1',
+                      complete ? 'bg-[#3B82F6]' : active ? 'bg-[#93C5FD]' : 'bg-[#E5E5E5]'
+                    )} />
+                    {i < STAGES.length - 1 && (
+                      <div className={cn(
+                        'w-1 h-1 rounded-full shrink-0 transition-all duration-300',
+                        complete ? 'bg-[#3B82F6]' : 'bg-[#E5E5E5]'
+                      )} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Time info */}
+            <div className="flex items-center justify-between text-xs text-[#AAAAAA]">
+              <span>
+                {elapsed > 0 ? `${formatElapsed(elapsed)} elapsed` : 'Starting…'}
+              </span>
+              <span>Usually 5–20 seconds</span>
             </div>
           </div>
+        )}
 
-          {/* Error */}
-          {error && (
-            <p className="text-xs text-[#EF4444] leading-relaxed">{error}</p>
-          )}
-
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={loading}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" disabled={loading || !url.trim()}>
-              {loading ? (
-                <>
-                  <Loader size={12} className="animate-spin" />
-                  Importing…
-                </>
-              ) : (
-                <>
-                  <ExternalLink size={12} />
-                  Import
-                </>
-              )}
-            </Button>
-          </div>
-        </form>
       </div>
     </div>
   )
