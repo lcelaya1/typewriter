@@ -16,7 +16,7 @@ export async function sendInviteEmail({
   role: 'viewer' | 'editor'
 }) {
   return resend.emails.send({
-    from: 'Typewriter <noreply@typewriter.app>',
+    from: 'Typewriter <onboarding@resend.dev>',
     to,
     subject: `${inviterName} shared a document with you`,
     html: `
