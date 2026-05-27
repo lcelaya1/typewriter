@@ -16,9 +16,9 @@ function extractGoogleDocId(url: string): string | null {
 async function fetchDocxBuffer(docId: string): Promise<Buffer> {
   const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=docx`
 
-  // Hard 40-second timeout covers both the TCP handshake and body streaming.
+  // Hard 60-second timeout covers both the TCP handshake and body streaming.
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 40_000)
+  const timer = setTimeout(() => controller.abort(), 60_000)
 
   let res: Response
   try {
@@ -107,11 +107,19 @@ export async function POST(request: Request) {
   }
 
   // ── Convert .docx → HTML via mammoth ─────────────────────────────────────
+  // We skip embedded images: a typical Google Doc can have 60–70 MB of base64
+  // image data which mammoth would expand to 90+ MB of HTML — far too large to
+  // store. Skipping images keeps the HTML to a few hundred KB of text content.
+  let imageCount = 0
   const { value: html, messages } = await mammoth.convertToHtml({ buffer }, {
     styleMap: [
       "p[style-name='Title'] => h1",
       "p[style-name='Subtitle'] => h2",
     ],
+    convertImage: mammoth.images.imgElement(() => {
+      imageCount++
+      return Promise.resolve({ src: '' }) // emit <img src=""> — no base64 payload
+    }),
   })
 
   if (messages.length) {
@@ -125,10 +133,27 @@ export async function POST(request: Request) {
     )
   }
 
+  // Strip any leftover bare <img> tags so the editor doesn't show broken images
+  const cleanHtml = html.replace(/<img(?:\s[^>]*)?>/gi, '')
+
+  // Guard: if the cleaned HTML is still unreasonably large something went wrong
+  const SIZE_LIMIT = 10 * 1024 * 1024 // 10 MB
+  if (cleanHtml.length > SIZE_LIMIT) {
+    return NextResponse.json(
+      { error: 'Document is too large to import. Try removing some content and re-exporting.' },
+      { status: 400 }
+    )
+  }
+
+  // Append an image notice if any images were found
+  const imageNotice = imageCount > 0
+    ? `<p><em>Note: ${imageCount} image${imageCount > 1 ? 's were' : ' was'} not imported (images are not supported in the current import).</em></p>`
+    : ''
+
   // Store HTML — the editor converts it to Tiptap JSON on first load
   const { data, error } = await adminClient
     .from('documents')
-    .insert({ owner_id: user.id, title, content: { _importedHtml: html } })
+    .insert({ owner_id: user.id, title, content: { _importedHtml: cleanHtml + imageNotice } })
     .select()
     .single()
 

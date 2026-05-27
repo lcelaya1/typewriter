@@ -28,9 +28,9 @@ interface Props {
 // ── Progress stages ───────────────────────────────────────────────────────
 
 const STAGES = [
-  { label: 'Connecting to Google Docs…',  upTo: 14 },
-  { label: 'Downloading document…',        upTo: 48 },
-  { label: 'Converting content…',          upTo: 74 },
+  { label: 'Connecting to Google Docs…',  upTo: 10 },
+  { label: 'Downloading document…',        upTo: 38 },
+  { label: 'Converting content…',          upTo: 78 },
   { label: 'Preparing your document…',     upTo: 93 },
 ]
 
@@ -301,7 +301,7 @@ function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               <span>
                 {elapsed > 0 ? `${formatElapsed(elapsed)} elapsed` : 'Starting…'}
               </span>
-              <span>Usually 5–20 seconds</span>
+              <span>Usually 15–40 seconds</span>
             </div>
           </div>
         )}
