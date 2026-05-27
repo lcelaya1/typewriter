@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import type { Editor } from '@tiptap/react'
-import { X, AlignLeft } from 'lucide-react'
+import { AlignLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface TocItem {
